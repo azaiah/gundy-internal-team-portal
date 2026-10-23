@@ -78,7 +78,7 @@ function callWindow(tz, now = new Date()) {
 const callable = (l, now) => l.phone && !CLOSED.has(l.stage) && callWindow(l.tz, now).status !== 'closed'
 function fill(text, me, settings) {
   const m = settings?.members?.[me] || {}
-  return (text || '').replaceAll('{{me}}', TEAM[me]?.name || 'Azaiah').replaceAll('{{myphone}}', m.phone || '[your number]').replaceAll('{{demo}}', settings?.demoUrl || '[demo link]')
+  return (text || '').replaceAll('{{me}}', TEAM[me]?.name || 'Azaiah').replaceAll('{{myphone}}', m.phone || '[your number]').replaceAll('{{demo}}', settings?.demoUrl || 'https://demo.gundyconsultations.com')
 }
 function relayHref(kind, { phone, body, to, subject }, settings) {
   const useRelay = settings?.useRelay === true
@@ -391,10 +391,10 @@ function Dashboard({ me, go, openLead }) {
         <div className="kpi"><p className="kpi-l">Open pipeline</p><p className="kpi-v">{fmtMoney(pipelineValue)}</p><p className="kpi-s">setup fees in talks</p></div>
         <div className="kpi"><p className="kpi-l">Lead pool</p><p className="kpi-v">{L.filter((l) => l.stage === 'new').length}</p><p className="kpi-s">{L.filter((l) => l.stage === 'new' && l.gov).length} gov · {L.filter((l) => l.stage === 'new' && !l.owner).length} unclaimed</p></div>
       </section>
-      <section className="grid-3" data-tour="regions">
+      <section className="grid-3 regions" data-tour="regions">
         {regionCards.map((r) => (
           <button key={r.key} type="button" className={`region region-${r.w.status}`} onClick={() => go('leads', { region: r.key })}>
-            <div className="row between"><span className="eyebrow">{r.label} · {r.abbr}</span><span className={`dot dot-${r.w.status}`}>{r.w.status === 'best' ? 'Best window' : r.w.status === 'open' ? 'Open' : 'Closed'}</span></div>
+            <div className="row between"><span className="eyebrow">{r.label}<span className="reg-abbr"> · {r.abbr}</span></span><span className={`dot dot-${r.w.status}`}>{r.w.status === 'best' ? 'Best window' : r.w.status === 'open' ? 'Open' : 'Closed'}</span></div>
             <p className="region-time">{r.w.label}</p>
             <p className="muted">{r.w.status === 'closed' ? r.w.text : `${r.n} callable now · ${r.gov} gov`}</p>
           </button>
@@ -954,7 +954,7 @@ function Settings({ me }) {
         ))}
         <div className="panel">
           <div className="panel-h"><h2>Links</h2></div>
-          <label className="field"><span>Demo portal link (goes in texts and emails)</span><input className="input" value={s.demoUrl || ''} onChange={(e) => setS({ ...s, demoUrl: e.target.value })} placeholder="https://gundy-demo.netlify.app" /></label>
+          <label className="field"><span>Demo portal link (goes in texts and emails)</span><input className="input" value={s.demoUrl || ''} onChange={(e) => setS({ ...s, demoUrl: e.target.value })} placeholder="https://demo.gundyconsultations.com" /></label>
           <label className="field"><span>Monthly revenue goal</span><input className="input" type="number" value={s.goal || 20000} onChange={(e) => setS({ ...s, goal: Number(e.target.value) })} /></label>
           <label className="toggle"><input type="checkbox" checked={s.useRelay === true} onChange={(e) => setS({ ...s, useRelay: e.target.checked })} /> Route call, text and email buttons through gundyconsultations.com/go (only if a phone won't open them directly)</label>
           <div className="row gap-s"><button className="btn btn-primary" disabled={!canWrite} onClick={save}>Save settings</button></div>
@@ -1035,7 +1035,7 @@ function Advisor({ me, go }) {
   const tips = []
   const add = (tone, title, body, action) => tips.push({ tone, title, body, action })
   if (!activity.length) add('info', 'Start logging every touch', 'The advisor learns from the contact log. Log every call, text and email, even no-answers, and this page turns into a coach within a few days.')
-  ;['azaiah', 'bilal'].forEach((who) => { const p = perDay(who); if (activity.length && p < 40) add('warn', `${TEAM[who].name}: ${p.toFixed(0)} touches a day this week`, `The math to $20K a month needs roughly 60 touches per person per day. Block two 90-minute call sessions, one in the East/Central window and one for the West Coast after 3 pm ET.`, ['dialer', 'Start a call block']) })
+  ;['azaiah', 'bilal'].forEach((who) => { const p = perDay(who); if (activity.length && p < 40) add('warn', `${TEAM[who].name}: ${p.toFixed(0)} ${Math.round(p) === 1 ? 'touch' : 'touches'} a day this week`, `The math to $20K a month needs roughly 60 touches per person per day. Block two 90-minute call sessions, one in the East/Central window and one for the West Coast after 3 pm ET.`, ['dialer', 'Start a call block']) })
   if (connect !== null && connect < 0.12) add('warn', `Connect rate is ${(connect * 100).toFixed(0)}%`, `Only ${(calls14.length ? (inBest / calls14.length) * 100 : 0).toFixed(0)}% of your calls landed in the best windows (7–8:30 am and 3:30–5:30 pm their time). Contractors pick up before the job site and on the drive home.`, ['leads', 'See who is callable'])
   if (overdue.length) add('hot', `${overdue.length} follow-ups are overdue`, 'Most deals close on touch four to eight. Clear these before calling anyone new.', ['home', 'Open command center'])
   if (stale.length) add('hot', `${stale.length} warm deals went quiet for 5+ days`, `${stale.slice(0, 3).map((l) => l.name).join(', ')}${stale.length > 3 ? '…' : ''}. A short "Have you given up on…?" email usually restarts these.`, ['pipeline', 'Open pipeline'])
