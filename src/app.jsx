@@ -53,6 +53,7 @@ const dayKey = (d) => { const x = new Date(d); return x.getFullYear() + '-' + St
 const addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); d.setHours(9, 0, 0, 0); return d.toISOString() }
 const fmtMoney = (n) => '$' + Math.round(n || 0).toLocaleString()
 const fmtShortDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''
+const logAct = (write, me, a) => write((db) => db.collection('activity').doc(uid('a')).set({ at: nowIso(), who: me, ...a })).catch(() => {})
 const fmtWhen = (iso) => {
   if (!iso) return ''
   const d = new Date(iso), s = (Date.now() - d.getTime()) / 1000
@@ -424,7 +425,7 @@ function Dashboard({ me, go, openLead }) {
       <section className="panel">
         <div className="panel-h"><h2>Live feed</h2></div>
         {activity.length === 0 ? <p className="muted">Calls, texts, claims and stage changes from both of you show up here as they happen.</p> :
-          <ul className="feed">{activity.slice(0, 14).map((a) => <li key={a.id}><Avatar who={a.who} size={22} /><span><b>{TEAM[a.who]?.name}</b> {a.label?.toLowerCase()} {a.leadName && <button className="link" onClick={() => openLead(a.leadId)}>{a.leadName}</button>}</span><span className="muted tiny">{fmtWhen(a.at)}</span></li>)}</ul>}
+          <ul className="feed">{activity.slice(0, 25).map((a) => <li key={a.id}><Avatar who={a.who} size={22} /><span><b>{TEAM[a.who]?.name}</b> {a.label ? a.label.charAt(0).toLowerCase() + a.label.slice(1) : ''} {a.leadName && <button className="link" onClick={() => openLead(a.leadId)}>{a.leadName}</button>}</span><span className="muted tiny">{fmtWhen(a.at)}</span></li>)}</ul>}
       </section>
     </div>
   )
@@ -526,7 +527,9 @@ function LeadDrawer({ id, me, onClose }) {
   const [subj, setSubj] = useState(0)
   const panelRef = useRef(null)
   useEffect(() => { setScripts(null); if (!db || !id) return; db.doc('scripts/' + id).get().then((s) => setScripts(s.exists ? s.data() : {})).catch(() => setScripts({})) }, [db, id])
+  const notesFocus = useRef(false)
   useEffect(() => { setNotes(l?.notes || '') }, [l?.id])
+  useEffect(() => { if (!notesFocus.current) setNotes(l?.notes || '') }, [l?.notes])
   useEffect(() => { const k = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); panelRef.current?.focus(); return () => window.removeEventListener('keydown', k) }, [onClose])
   if (!l) return null
   const f = (t) => fill(t, me, settings)
@@ -547,6 +550,7 @@ function LeadDrawer({ id, me, onClose }) {
             <p className="eyebrow">{l.gov ? 'Gov contractor' : l.track === 'build' ? 'Website + Portal' : 'Portal only'} · {l.trade}</p>
             <h2 className="drawer-t">{l.name}</h2>
             <p className="muted">{[l.addr, l.city, l.state, l.zip].filter(Boolean).join(', ')}{l.county ? ` · ${l.county}` : ''}</p>
+            {l.updatedBy && TEAM[l.updatedBy] && <p className="attrib-row"><Avatar who={l.updatedBy} size={18} /> Last updated by {TEAM[l.updatedBy].name} · {fmtWhen(l.updatedAt)}</p>}
           </div>
           <button className="icon-btn" onClick={onClose} aria-label="Close"><Icon d={I.x} /></button>
         </header>
@@ -591,7 +595,7 @@ function LeadDrawer({ id, me, onClose }) {
               <label className="tiny muted" htmlFor="stage-sel">Stage</label>
               <select id="stage-sel" className="input input-sm" value={l.stage} disabled={!canWrite} onChange={(e) => A.setStage(l, e.target.value)}>{STAGES.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
               <label className="tiny muted" htmlFor="next-at">Next touch</label>
-              <input id="next-at" type="date" className="input input-sm" value={l.nextAt ? dayKey(l.nextAt) : ''} disabled={!canWrite} onChange={(e) => A.patchLead(l.id, { nextAt: e.target.value ? new Date(e.target.value + 'T09:00').toISOString() : null })} />
+              <input id="next-at" type="date" className="input input-sm" value={l.nextAt ? dayKey(l.nextAt) : ''} disabled={!canWrite} onChange={(e) => A.patchLead(l.id, { nextAt: e.target.value ? new Date(e.target.value + 'T09:00').toISOString() : null }).then(() => e.target.value && A.addActivity({ type: 'schedule', label: `Scheduled the next touch for ${fmtShortDate(e.target.value + 'T12:00')} on`, leadId: l.id, leadName: l.name }))} />
             </div>
           </section>
 
@@ -644,11 +648,11 @@ function LeadDrawer({ id, me, onClose }) {
           </section>
 
           <section data-tour="notes">
-            <p className="sec-t">Notes</p>
-            <textarea className="input" rows={4} value={notes} disabled={!canWrite} onChange={(e) => setNotes(e.target.value)} onBlur={() => notes !== (l.notes || '') && A.patchLead(l.id, { notes })} placeholder="Shared notes: decision-maker, black swan, budget, timing" />
+            <p className="sec-t">Notes{l.notesBy && <span className="attrib"> · last edited by {TEAM[l.notesBy]?.name} {fmtWhen(l.notesAt)}</span>}</p>
+            <textarea className="input" rows={4} value={notes} disabled={!canWrite} onFocus={() => { notesFocus.current = true }} onChange={(e) => setNotes(e.target.value)} onBlur={() => { notesFocus.current = false; if (notes !== (l.notes || '')) { A.patchLead(l.id, { notes, notesBy: me, notesAt: nowIso() }); A.addActivity({ type: 'note', label: 'Updated notes on', leadId: l.id, leadName: l.name }) } }} placeholder="Shared notes: decision-maker, black swan, budget, timing" />
             <div className="row gap-s">
               <input className="input" value={taskT} onChange={(e) => setTaskT(e.target.value)} placeholder="Add a task for this lead (e.g. Send 3 matching bids)" />
-              <button className="btn" disabled={!taskT.trim() || !canWrite} onClick={async () => { await A.patchLead(l.id, {}); const t = { title: taskT.trim(), assignee: l.owner || me, createdBy: me, leadId: l.id, leadName: l.name, due: dayKey(new Date(Date.now() + 864e5)), done: false, createdAt: nowIso() }; await db.collection('tasks').doc(uid('t')).set(t); setTaskT('') }}>Add</button>
+              <button className="btn" disabled={!taskT.trim() || !canWrite} onClick={async () => { await A.patchLead(l.id, {}); const t = { title: taskT.trim(), assignee: l.owner || me, createdBy: me, leadId: l.id, leadName: l.name, due: dayKey(new Date(Date.now() + 864e5)), done: false, createdAt: nowIso() }; await db.collection('tasks').doc(uid('t')).set(t); A.addActivity({ type: 'task', label: `${t.assignee === me ? 'Added a task' : 'Assigned ' + TEAM[t.assignee]?.name + ' a task'}: “${t.title}” on`, leadId: l.id, leadName: l.name }); setTaskT('') }}>Add</button>
             </div>
             {leadTasks.length > 0 && <ul className="mini">{leadTasks.map((t) => <li key={t.id} className="mini-row"><span>{t.title}</span><Avatar who={t.assignee} size={18} /></li>)}</ul>}
           </section>
@@ -661,7 +665,7 @@ function LeadDrawer({ id, me, onClose }) {
           {l.stage === 'won' || l.stage === 'proposal' || l.stage === 'demo' || l.stage === 'onboarding' || l.stage === 'live' ? (
             <section>
               <p className="sec-t">Deal</p>
-              <div className="row gap-s wrap">{Object.entries(PKGS).map(([k, p]) => <button key={k} className={`pill ${l.deal?.pkg === k ? 'on' : ''}`} disabled={!canWrite} onClick={() => A.patchLead(l.id, { deal: { pkg: k, setup: p.setup, monthly: p.monthly } })}>{p.name} · {fmtMoney(p.setup)} + {fmtMoney(p.monthly)}/mo</button>)}</div>
+              <div className="row gap-s wrap">{Object.entries(PKGS).map(([k, p]) => <button key={k} className={`pill ${l.deal?.pkg === k ? 'on' : ''}`} disabled={!canWrite} onClick={() => A.patchLead(l.id, { deal: { pkg: k, setup: p.setup, monthly: p.monthly, by: me } }).then(() => A.addActivity({ type: 'deal', label: `Set the ${p.name} package (${fmtMoney(p.setup)} + ${fmtMoney(p.monthly)}/mo) on`, leadId: l.id, leadName: l.name }))}>{p.name} · {fmtMoney(p.setup)} + {fmtMoney(p.monthly)}/mo</button>)}</div>
             </section>) : null}
         </div>
       </aside>
@@ -753,8 +757,8 @@ function Tasks({ me, openLead }) {
   const { tasks, write, canWrite } = useData()
   const [title, setTitle] = useState(''); const [who, setWho] = useState(me); const [due, setDue] = useState(dayKey(new Date())); const [view, setView] = useState('open')
   const today = dayKey(new Date())
-  const add = async (e) => { e.preventDefault(); if (!title.trim()) return; await write((db) => db.collection('tasks').doc(uid('t')).set({ title: title.trim(), assignee: who, createdBy: me, due, done: false, createdAt: nowIso() })); setTitle('') }
-  const toggle = (t) => write((db) => db.doc('tasks/' + t.id).update({ done: !t.done, doneAt: !t.done ? nowIso() : null, doneBy: me }))
+  const add = async (e) => { e.preventDefault(); if (!title.trim()) return; await write((db) => db.collection('tasks').doc(uid('t')).set({ title: title.trim(), assignee: who, createdBy: me, due, done: false, createdAt: nowIso() })); logAct(write, me, { type: 'task', label: `${who === me ? 'Added a task' : 'Assigned ' + TEAM[who].name + ' a task'}: “${title.trim()}”` }); setTitle('') }
+  const toggle = (t) => write((db) => db.doc('tasks/' + t.id).update({ done: !t.done, doneAt: !t.done ? nowIso() : null, doneBy: me })).then(() => logAct(write, me, { type: 'task', label: `${t.done ? 'Reopened' : 'Finished'} task: “${t.title}”`, leadId: t.leadId, leadName: t.leadName }))
   const del = (t) => write((db) => db.doc('tasks/' + t.id).delete())
   const shown = tasks.filter((t) => view === 'open' ? !t.done : t.done).sort((a, b) => (a.due || '9').localeCompare(b.due || '9'))
   return (
@@ -794,7 +798,7 @@ const NOTE_COLORS = ['amber', 'violet', 'teal', 'rose', 'slate']
 function Board({ me }) {
   const { board, write, canWrite } = useData()
   const [title, setTitle] = useState(''); const [body, setBody] = useState(''); const [color, setColor] = useState('amber'); const [drag, setDrag] = useState(null)
-  const add = async (e) => { e.preventDefault(); if (!title.trim()) return; await write((db) => db.collection('board').doc(uid('n')).set({ title: title.trim(), body: body.trim(), color, column: 'ideas', author: me, votes: {}, pinned: false, createdAt: nowIso() })); setTitle(''); setBody('') }
+  const add = async (e) => { e.preventDefault(); if (!title.trim()) return; await write((db) => db.collection('board').doc(uid('n')).set({ title: title.trim(), body: body.trim(), color, column: 'ideas', author: me, votes: {}, pinned: false, createdAt: nowIso() })); logAct(write, me, { type: 'idea', label: `Pinned an idea: “${title.trim()}”` }); setTitle(''); setBody('') }
   const up = (n, patch) => write((db) => db.doc('board/' + n.id).update(patch))
   return (
     <div className="page">
@@ -809,7 +813,7 @@ function Board({ me }) {
         {BOARD_COLS.map(([k, v]) => {
           const items = board.filter((n) => (n.column || 'ideas') === k).sort((a, b) => (b.pinned - a.pinned) || (Object.keys(b.votes || {}).length - Object.keys(a.votes || {}).length) || (b.createdAt || '').localeCompare(a.createdAt || ''))
           return (
-            <section key={k} className="bcol" onDragOver={(e) => e.preventDefault()} onDrop={() => { const n = board.find((x) => x.id === drag); if (n && canWrite) up(n, { column: k }); setDrag(null) }}>
+            <section key={k} className="bcol" onDragOver={(e) => e.preventDefault()} onDrop={() => { const n = board.find((x) => x.id === drag); if (n && canWrite) { up(n, { column: k, movedBy: me }); logAct(write, me, { type: 'idea', label: `Moved “${n.title}” to ${BOARD_COLS.find((c) => c[0] === k)?.[1] || k}` }) } setDrag(null) }}>
               <header className="kcol-h"><span>{v}</span><span className="muted">{items.length}</span></header>
               <div className="bcol-body">
                 {items.length === 0 && <p className="tiny muted pad">{k === 'ideas' ? 'Pin the first idea above.' : 'Drag notes here.'}</p>}
@@ -1147,11 +1151,11 @@ function Finance({ me }) {
     const doc = { ...form, amount: Number(form.amount), createdBy: me, createdAt: nowIso() }
     if (doc.kind === 'subscription') { doc.status = 'active'; doc.nextDue = form.due || form.date; doc.cadence = form.cadence === 'once' ? 'monthly' : form.cadence; doc.active = true }
     if (doc.kind === 'payout') doc.category = 'Owner draw'
-    await write((db) => db.collection('finance').doc(uid('f')).set(doc)); setForm({ ...form, title: '', party: '', amount: '' })
+    await write((db) => db.collection('finance').doc(uid('f')).set(doc)); logAct(write, me, { type: 'money', label: `Added ${(FIN_KINDS.find((k) => k[0] === doc.kind)?.[1] || doc.kind).toLowerCase()}: ${doc.title} ${fmtMoney(doc.amount)}` }); setForm({ ...form, title: '', party: '', amount: '' })
   }
-  const markPaid = (f) => write((db) => db.doc('finance/' + f.id).update({ status: 'paid', date: today, paidBy: me }))
-  const paySub = async (f) => { await write((db) => db.collection('finance').doc(uid('f')).set({ kind: 'expense', title: f.title, party: f.party || '', category: f.category, amount: f.amount, status: 'paid', date: today, createdBy: me, createdAt: nowIso(), fromSub: f.id })); await write((db) => db.doc('finance/' + f.id).update({ nextDue: bump(f.nextDue, f.cadence) })) }
-  const del = (f) => write((db) => db.doc('finance/' + f.id).delete())
+  const markPaid = (f) => write((db) => db.doc('finance/' + f.id).update({ status: 'paid', date: today, paidBy: me })).then(() => logAct(write, me, { type: 'money', label: `Marked paid: ${f.title} ${fmtMoney(f.amount)}` }))
+  const paySub = async (f) => { await write((db) => db.collection('finance').doc(uid('f')).set({ kind: 'expense', title: f.title, party: f.party || '', category: f.category, amount: f.amount, status: 'paid', date: today, createdBy: me, createdAt: nowIso(), fromSub: f.id })); await write((db) => db.doc('finance/' + f.id).update({ nextDue: bump(f.nextDue, f.cadence) })); logAct(write, me, { type: 'money', label: `Recorded a ${f.title} charge ${fmtMoney(f.amount)}` }) }
+  const del = (f) => write((db) => db.doc('finance/' + f.id).delete()).then(() => logAct(write, me, { type: 'money', label: `Deleted ${f.title} ${fmtMoney(f.amount)} from money` }))
   const saveCfg = () => write((db) => db.doc('settings/finance').set({ ...cfg, updatedAt: nowIso(), updatedBy: me }))
   const exportCsv = async () => {
     const rows = [['kind', 'title', 'party', 'category', 'amount', 'status', 'date', 'due', 'cadence', 'created_by'], ...F.map((f) => [f.kind, f.title, f.party, f.category, f.amount, f.status, f.date, f.due || f.nextDue || '', f.cadence || '', f.createdBy])]
@@ -1222,7 +1226,7 @@ function Finance({ me }) {
           {list.length === 0 ? <p className="muted">Nothing here yet. Add the first entry above.</p> :
             <div className="tbl-wrap"><table className="tbl"><thead><tr><th>Item</th><th>Type</th><th>Category</th><th>Amount</th><th>{tab === 'subscription' ? 'Renews' : 'Date / due'}</th><th>Status</th><th></th></tr></thead>
               <tbody>{list.map((f) => <tr key={f.id}>
-                <td><b>{f.title}</b>{(f.party || f.who) && <span className="tiny muted"> · {f.kind === 'payout' ? TEAM[f.who]?.name : f.party}</span>}</td>
+                <td><b>{f.title}</b>{(f.party || f.who) && <span className="tiny muted"> · {f.kind === 'payout' ? TEAM[f.who]?.name : f.party}</span>}{TEAM[f.createdBy] && <span className="attrib-row"><Avatar who={f.createdBy} size={16} /> Added by {TEAM[f.createdBy].name}{f.paidBy && TEAM[f.paidBy] ? ` · paid by ${TEAM[f.paidBy].name}` : ''}</span>}</td>
                 <td>{FIN_KINDS.find((k) => k[0] === f.kind)?.[1]}</td><td>{f.category}</td>
                 <td className="mono">{fmtMoney(f.amount)}{f.cadence && f.cadence !== 'once' ? <span className="tiny muted">/{f.cadence === 'yearly' ? 'yr' : 'mo'}</span> : null}</td>
                 <td>{fmtShortDate(((f.kind === 'subscription' ? f.nextDue : f.status === 'pending' ? f.due : f.date) || '') + 'T12:00') || '—'}</td>
@@ -1289,7 +1293,7 @@ function App() {
 
 function SeedLoader() {
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState('')
-  const run = async () => { setBusy(true); try { const r = await serverApi('seed', { method: 'POST' }); setMsg(`Loaded ${r.created} records.`); setTimeout(() => location.reload(), 900) } catch (e) { setMsg(e.message) } setBusy(false) }
+  const run = async () => { setBusy(true); try { let off = 0, made = 0, r; do { r = await serverApi(`seed?offset=${off}&limit=60`, { method: 'POST' }); made += r.created; off = r.next; setMsg(`Loading… ${Math.min(off, r.total)} of ${r.total}`) } while (!r.done); setMsg(`Loaded ${made} new records.`); setTimeout(() => location.reload(), 900) } catch (e) { setMsg(e.message) } setBusy(false) }
   return <div className="empty"><p className="empty-t">The lead database is empty</p><p className="muted">Load the first sweep: 262 real contractor leads (180 government contractors and 82 local contractors) with custom scripts for each.</p><div><button className="btn btn-primary" disabled={busy} onClick={run}>{busy ? 'Loading…' : 'Load the first sweep'}</button></div>{msg && <p className="muted">{msg}</p>}</div>
 }
 function Login({ onDone }) {

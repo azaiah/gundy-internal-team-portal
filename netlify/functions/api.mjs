@@ -150,9 +150,11 @@ export default async (req) => {
       const seed = (await import('./seed-data.mjs')).default
       const ops = []
       for (const [c, docs] of Object.entries(seed)) for (const [id, data] of Object.entries(docs)) ops.push({ op: 'create', c, id, data })
-      let total = { created: 0, skipped: 0 }
-      for (let i = 0; i < ops.length; i += 150) { const r = await applyOps(st, ops.slice(i, i + 150)); total.created += r.created; total.skipped += r.skipped }
-      return json(total)
+      // Loaded in slices (?offset=&limit=) so each request finishes well inside Netlify's function time limit.
+      const offset = Math.max(0, Number(url.searchParams.get('offset') || 0)), limit = Math.min(120, Math.max(1, Number(url.searchParams.get('limit') || 60)))
+      const slice = ops.slice(offset, offset + limit)
+      const r = slice.length ? await applyOps(st, slice) : { created: 0, skipped: 0 }
+      return json({ created: r.created, skipped: r.skipped, next: offset + slice.length, total: ops.length, done: offset + slice.length >= ops.length })
     }
     if (path === 'coach' && req.method === 'POST') {
       if (!process.env.ANTHROPIC_API_KEY) return json({ error: 'AI coaching is off. Add ANTHROPIC_API_KEY in Netlify to turn it on.' }, 503)
